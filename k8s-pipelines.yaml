@@ -1,0 +1,247 @@
+# Starter pipeline
+trigger: none
+parameters:
+  - name:  Linux_Package_Link
+    displayName: Enter Linux Package Link
+    type: string
+  - name:  Custom_Image
+    displayName: Custom Image
+    type: boolean
+    default: false
+  - name:  Release_Image
+    displayName: Release Image
+    type: boolean
+    default: true
+  - name: Release_Version
+    displayName: Select the Release Version
+    type: string
+    values:
+    - '4.2.52'
+    - '4.2.78'
+    - '4.2.85'
+    - '5.1.20'
+    - '5.2.26'
+    - '5.3.8'
+    - '5.4.20'
+    - '5.4.30'
+    - '6.1.34'
+    - '6.1.45'
+    - '6.2.32'
+    default: '6.2.32'
+  - name:  Image_Tag_Name
+    displayName: Enter Image Tag Name
+    type: string
+pool:
+  name: Azure Pipelines
+  vmImage: ubuntu-latest
+  path: Automation\bold-reports-utilities
+variables:
+    - name: clientlibraries
+      value: "oracle =BoldReports.Data.Oracle;mysql =BoldReports.Data.MySQL;MemSQL;MariaDB;postgresql =BoldReports.Data.PostgreSQL;"
+    - name: clientlibrarieslatest
+      value: "oracle =BoldReports.Data.Oracle;mysql =BoldReports.Data.MySQL;MemSQL;MariaDB;postgresql =BoldReports.Data.PostgreSQL;snowflake =BoldReports.Data.Snowflake;"
+    - name: clientlibrary_extractedpath
+      value: "/output/BoldReports_EnterpriseReporting-Linux/clientlibrary/boldreports/clientlibraries/*"
+    - name: api_path
+      value: "/output/BoldReports_EnterpriseReporting-Linux/application/reporting/api/"
+    - name: web_path
+      value: "/output/BoldReports_EnterpriseReporting-Linux/application/reporting/web/"
+    - name: viewer_path
+      value: "/output/BoldReports_EnterpriseReporting-Linux/application/reporting/viewer/"
+    - name: jobs_path
+      value: "/output/BoldReports_EnterpriseReporting-Linux/application/reporting/jobs/"
+    - name: designer_path
+      value: "/output/BoldReports_EnterpriseReporting-Linux/application/reporting/reportservice/"
+    - name: idp_web_path
+      value: "/output/BoldReports_EnterpriseReporting-Linux/application/idp/web/"
+    - name: etl_path
+      value : "/output/BoldReports_EnterpriseReporting-Linux/application/etl/etlservice/"
+    - name: boldimages
+      type: object
+      default: 
+        - name: boldreports-server-api
+          dockerfile: api.Dockerfile
+        - name: boldreports-server
+          dockerfile: web.Dockerfile
+        - name: boldreports-server-jobs
+          dockerfile: jobs.Dockerfile
+        - name: boldreports-designer
+          dockerfile: designer.Dockerfile
+        - name: bold-identity
+          dockerfile: id_web.Dockerfile
+        - name: bold-idp-api
+          dockerfile: id_api.Dockerfile
+        - name: bold-ums
+          dockerfile: ums.Dockerfile
+    - name: imageTagName
+      value: "${{ parameters.Image_Tag_Name }}"
+steps:
+  - task: PowerShell@2
+    inputs:
+        targetType: 'inline'
+        script: |
+          Invoke-WebRequest -Uri ${{ parameters.Linux_Package_Link }} -OutFile "$(Build.SourcesDirectory)/BoldReports_EnterpriseReporting_Linux.zip"
+        displayName: 'Download Linux Packages'
+
+  - task: PowerShell@2
+    inputs:
+        targetType: 'inline'
+        script: 'Expand-Archive -Path $(Build.SourcesDirectory)/BoldReports_EnterpriseReporting_Linux.zip -DestinationPath $(Build.SourcesDirectory)/output/'
+        displayName: 'Extract Linux Packages'
+
+  - task: PowerShell@2
+    inputs:
+        targetType: 'inline'
+        script: 'Expand-Archive -Path $(Build.SourcesDirectory)/output/BoldReports_EnterpriseReporting-Linux/clientlibrary/boldreports/clientlibraries.zip -DestinationPath $(Build.SourcesDirectory)/output/BoldReports_EnterpriseReporting-Linux/clientlibrary/boldreports/clientlibraries/'
+        displayName : "Extracting Clientlibraries from Linux Package"
+
+  - ${{ if eq(parameters.Custom_Image, false) }}:
+      - task: PowerShell@2
+        inputs:
+          targetType: 'inline'
+          script: |
+            echo "Release image and version is ${{ parameters.Release_Version }}"
+            
+            # Copy entrypoint scripts to respective application directories
+            
+            cp -r $(Build.SourcesDirectory)/movesharedfiles/MoveSharedFiles/shell_scripts/api/entrypoint.sh  $(Build.SourcesDirectory)/output/BoldReports_EnterpriseReporting-Linux/application/reporting/api
+            
+            cp -r $(Build.SourcesDirectory)/movesharedfiles/MoveSharedFiles/shell_scripts/web/entrypoint.sh  $(Build.SourcesDirectory)/output/BoldReports_EnterpriseReporting-Linux/application/reporting/web
+            
+            cp -r $(Build.SourcesDirectory)/movesharedfiles/MoveSharedFiles/shell_scripts/jobs/entrypoint.sh $(Build.SourcesDirectory)/output/BoldReports_EnterpriseReporting-Linux/application/reporting/jobs
+            
+            cp -r $(Build.SourcesDirectory)/movesharedfiles/MoveSharedFiles/shell_scripts/designer/entrypoint.sh $(Build.SourcesDirectory)/output/BoldReports_EnterpriseReporting-Linux/application/reporting/reportservice
+            
+            cp -r $(Build.SourcesDirectory)/movesharedfiles/MoveSharedFiles/shell_scripts/id_web/entrypoint.sh $(Build.SourcesDirectory)/output/BoldReports_EnterpriseReporting-Linux/application/idp/web
+            
+            # Conditional copy if Release_Version is greater than equal to 5.1.20
+            if [[ "${{ parameters.Release_Version }}" >= '5.1.20' ]]; then
+              cp -r $(Build.SourcesDirectory)/movesharedfiles/MoveSharedFiles/shell_scripts/viewer/entrypoint.sh $(Build.SourcesDirectory)/output/BoldReports_EnterpriseReporting-Linux/application/reporting/viewer
+            fi
+
+            # Create directories and copy additional files
+            mkdir -p $(Build.SourcesDirectory)$(idp_web_path)appdatafiles
+
+            cp -r $(Build.SourcesDirectory)/build/dockerfiles/${{ parameters.Release_Version }}_dockerfiles/single-docker-image/clientlibrary/MoveSharedFiles $(Build.SourcesDirectory)$(idp_web_path)appdatafiles
+
+            cp -r $(Build.SourcesDirectory)/output/BoldReports_EnterpriseReporting-Linux/application/app_data/configuration/product.json $(Build.SourcesDirectory)$(idp_web_path)appdatafiles/MoveSharedFiles/app_data/configuration
+
+            cp -r $(Build.SourcesDirectory)$(clientlibrary_extractedpath) $(Build.SourcesDirectory)$(idp_web_path)appdatafiles/MoveSharedFiles/app_data/optional-libs/boldreports/clientlibraries
+
+            # Copy release-specific files
+            cp -r $(Build.SourcesDirectory)/installscripts/azurepipeline/dockerfiles/release/${{ parameters.Release_Version }}/* $(Build.SourcesDirectory)/
+        
+        displayName: 'Release Image Processing'
+  - ${{ else }}:
+    - task: PowerShell@2
+      inputs:
+          targetType: 'inline'
+          script: |
+                    echo "Custom image and version is ${{ parameters.Release_Version }}"
+
+                    # Install Client Library in Reporting
+
+                    cp -r $(Build.SourcesDirectory)"$(clientlibrary_extractedpath)" $(Build.SourcesDirectory)"$(api_path)"
+
+                    cp -r $(Build.SourcesDirectory)"$(clientlibrary_extractedpath)" $(Build.SourcesDirectory)"$(web_path)"
+
+                    cp -r $(Build.SourcesDirectory)"$(clientlibrary_extractedpath)" $(Build.SourcesDirectory)"$(jobs_path)"
+
+                    # Conditional copy if Release_Version is greater than equal to 5.1.20
+                    if [[ "${{ parameters.Release_Version }}" >= '5.1.20' ]]; then
+                      cp -r $(Build.SourcesDirectory)"$(clientlibrary_extractedpath)" $(Build.SourcesDirectory)"$(viewer_path)"
+                    fi
+
+                    cp -r $(Build.SourcesDirectory)"$(clientlibrary_extractedpath)" $(Build.SourcesDirectory)"$(designer_path)"
+
+                    if [[ "${{ parameters.Release_Version }}" >= '6.2.32' ]]; then
+                      dotnet $(Build.SourcesDirectory)/output/BoldReports_EnterpriseReporting-Linux/clientlibrary/boldreports/clientlibraryutility/ClientLibraryUtil.dll "$(clientlibrarieslatest)" "$(Build.SourcesDirectory)"$(api_path)"appsettings.Production.json"
+
+                      dotnet $(Build.SourcesDirectory)/output/BoldReports_EnterpriseReporting-Linux/clientlibrary/boldreports/clientlibraryutility/ClientLibraryUtil.dll "$(clientlibrarieslatest)" "$(Build.SourcesDirectory)"$(jobs_path)"appsettings.Production.json"
+                    
+                      # Conditional copy if Release_Version is greater than equal to 5.1.20
+                      if [[ "${{ parameters.Release_Version }}" >= '5.1.20' ]]; then
+                        dotnet $(Build.SourcesDirectory)/output/BoldReports_EnterpriseReporting-Linux/clientlibrary/boldreports/clientlibraryutility/ClientLibraryUtil.dll "$(clientlibrarieslatest)" "$(Build.SourcesDirectory)"$(viewer_path)"appsettings.Production.json;"
+                      fi
+
+                      dotnet $(Build.SourcesDirectory)/output/BoldReports_EnterpriseReporting-Linux/clientlibrary/boldreports/clientlibraryutility/ClientLibraryUtil.dll "$(clientlibrarieslatest)" "$(Build.SourcesDirectory)"$(web_path)"appsettings.Production.json"
+
+                      dotnet $(Build.SourcesDirectory)/output/BoldReports_EnterpriseReporting-Linux/clientlibrary/boldreports/clientlibraryutility/ClientLibraryUtil.dll "$(clientlibrarieslatest)" "$(Build.SourcesDirectory)"$(designer_path)"appsettings.json"
+                    else
+                      dotnet $(Build.SourcesDirectory)/output/BoldReports_EnterpriseReporting-Linux/clientlibrary/boldreports/clientlibraryutility/ClientLibraryUtil.dll "$(clientlibrarieslatest)" "$(Build.SourcesDirectory)"$(api_path)"appsettings.Production.json"
+
+                      dotnet $(Build.SourcesDirectory)/output/BoldReports_EnterpriseReporting-Linux/clientlibrary/boldreports/clientlibraryutility/ClientLibraryUtil.dll "$(clientlibrarieslatest)" "$(Build.SourcesDirectory)"$(jobs_path)"appsettings.Production.json"
+                    
+                      # Conditional copy if Release_Version is greater than equal to 5.1.20
+                      if [[ "${{ parameters.Release_Version }}" >= '5.1.20' ]]; then
+                        dotnet $(Build.SourcesDirectory)/output/BoldReports_EnterpriseReporting-Linux/clientlibrary/boldreports/clientlibraryutility/ClientLibraryUtil.dll "$(clientlibraries)" "$(Build.SourcesDirectory)"$(viewer_path)"appsettings.Production.json;"
+                      fi
+
+                      dotnet $(Build.SourcesDirectory)/output/BoldReports_EnterpriseReporting-Linux/clientlibrary/boldreports/clientlibraryutility/ClientLibraryUtil.dll "$(clientlibraries)" "$(Build.SourcesDirectory)"$(web_path)"appsettings.Production.json"
+
+                      dotnet $(Build.SourcesDirectory)/output/BoldReports_EnterpriseReporting-Linux/clientlibrary/boldreports/clientlibraryutility/ClientLibraryUtil.dll "$(clientlibraries)" "$(Build.SourcesDirectory)"$(designer_path)"appsettings.json"
+                    fi
+
+                    # IDP Utility Files
+
+                    cp -r $(Build.SourcesDirectory)/movesharedfiles/MoveSharedFiles/shell_scripts/id_web/entrypoint.sh $(Build.SourcesDirectory)/output/BoldReports_EnterpriseReporting-Linux/application/idp/web
+
+                    mkdir  $(Build.SourcesDirectory)"$(idp_web_path)"appdatafiles
+
+                    cp -r $(Build.SourcesDirectory)/build/dockerfiles/${{ parameters.Release_Version }}_dockerfiles/single-docker-image/clientlibrary/MoveSharedFiles $(Build.SourcesDirectory)"$(idp_web_path)"appdatafiles
+
+                    cp -r $(Build.SourcesDirectory)/output/BoldReports_EnterpriseReporting-Linux/application/app_data/configuration/product.json $(Build.SourcesDirectory)"$(idp_web_path)"appdatafiles/MoveSharedFiles/app_data/configuration
+
+                    cp -r $(Build.SourcesDirectory)"$(clientlibrary_extractedpath)" $(Build.SourcesDirectory)"$(idp_web_path)"appdatafiles/MoveSharedFiles/app_data/optional-libs/boldreports/clientlibraries/
+
+                    cp -r $(Build.SourcesDirectory)/installscripts/azurepipeline/dockerfiles/custom/${{ parameters.Release_Version }}/* $(Build.SourcesDirectory)/
+          displayName: 'Custom Image Processing'
+
+  - ${{ each image in parameters.boldimages }}:
+      - task: Docker@2
+        inputs:
+          containerRegistry: 'Push Image to Artifact Registry'
+          repository: 'boldreports-dev/images/${{ image.name }}'
+          command: 'buildAndPush'
+          Dockerfile: '${{ image.dockerfile }}'
+          tags: '$(imageTagName)'
+        displayName: Build and Push Docker Image for ${{ image.name }}
+
+  - ${{ if gt(parameters.Release_Version, '5.1.20') }}:
+    - task: Docker@2
+      inputs:
+          containerRegistry: 'Push Image to Artifact Registry'
+          repository: 'boldreports-dev/images/boldreports-viewer'
+          command: 'buildAndPush'
+          Dockerfile: 'viewer.Dockerfile'
+          tags: '$(imageTagName)'
+          displayName: Build and Push Docker Image for boldreports-viewer
+  
+  - ${{ if gt(parameters.Release_Version, '6.1.32') }}:
+    - task: Docker@2
+      inputs:
+          containerRegistry: 'Push Image to Artifact Registry'
+          repository: 'boldreports-dev/images/bold-etl'
+          command: 'buildAndPush'
+          Dockerfile: 'etl.Dockerfile'
+          tags: '$(imageTagName)'
+          displayName: Build and Push Docker Image for bold-etl
+
+  - task: PowerShell@2
+    inputs:
+        targetType: 'inline'
+        script: '(Get-Content installscripts/azurepipeline/k8sfiles/${{ parameters.Release_Version }}/deployment.yaml).replace(''#ImageUrl#'', ''$(imageTagName)'') | Set-Content installscripts/azurepipeline/k8sfiles/${{ parameters.Release_Version }}/deployment.yaml'
+        displayName: Replace Tag in deployment file
+
+  - task: PowerShell@2
+    inputs:
+        targetType: 'inline'
+        script: '(Get-Content installscripts/azurepipeline/k8sfiles/${{ parameters.Release_Version }}/docker-compose.yml).replace(''#ImageUrl#'', ''$(imageTagName)'') | Set-Content installscripts/azurepipeline/k8sfiles/${{ parameters.Release_Version }}/docker-compose.yml'
+        displayName: Replace Tag in docker deployment file
+
+  - task: PublishPipelineArtifact@1
+    inputs:
+        targetPath: '$(Build.SourcesDirectory)/installscripts/azurepipeline/k8sfiles/${{ parameters.Release_Version }}'
+        artifact: 'manifest'
+        publishLocation: 'pipeline'
+        displayName: move the tag replaced deployment file to Release pipeline
